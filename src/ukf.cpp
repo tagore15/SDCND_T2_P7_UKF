@@ -15,7 +15,7 @@ UKF::UKF() {
   use_laser_ = true;
 
   // if this is false, radar measurements will be ignored (except during init)
-  use_radar_ = true;
+  use_radar_ = false;
 
   // initial state vector
   x_ = VectorXd(5);
@@ -54,6 +54,8 @@ UKF::UKF() {
   n_x_ = 5;
   n_aug_ = 7;
   lambda_ = 3 - n_aug_;
+  is_initialized_ = false;
+  previous_t = 0;
 }
 
 UKF::~UKF() {}
@@ -95,11 +97,11 @@ void UKF::ProcessMeasurement(MeasurementPackage meas_package) {
   Prediction(delta_t);
 
   // update
-  if (meas_package.sensor_type_ == MeasurementPackage::LASER)
+  if (meas_package.sensor_type_ == MeasurementPackage::LASER && use_laser_)
   {
     UpdateLidar(meas_package);
   }
-  else if (meas_package.sensor_type_ == MeasurementPackage::RADAR)
+  else if (meas_package.sensor_type_ == MeasurementPackage::RADAR && use_radar_)
   {
     UpdateRadar(meas_package);
   }
@@ -248,7 +250,7 @@ void UKF::UpdateLidar(MeasurementPackage meas_package) {
         0, 1, 0, 0, 0;
 
   VectorXd z_pred = H_ * x_;
-  VectorXd y = meas_package.raw_measurements_ - x_;
+  VectorXd y = meas_package.raw_measurements_ - z_pred;
 
   MatrixXd Ht = H_.transpose();
   MatrixXd S = H_ * P_ * Ht + R_;
@@ -276,7 +278,14 @@ void UKF::UpdateRadar(MeasurementPackage meas_package) {
 
   You'll also need to calculate the radar NIS.
   */
-  //transform sigma points into measurement space
+  
+
+
+  /************************** transform sigma points into measurement space *******************************/
+  int n_z = 3; // dimension of measurement space
+
+  //create matrix for sigma points in measurement space
+  MatrixXd Zsig = MatrixXd(n_z, 2 * n_aug_ + 1);
   for (int i = 0; i < 2 * n_aug_ + 1; i++) {  //2n+1 simga points
 
     // extract values for better readibility
@@ -294,17 +303,22 @@ void UKF::UpdateRadar(MeasurementPackage meas_package) {
     Zsig(2,i) = (p_x*v1 + p_y*v2 ) / sqrt(p_x*p_x + p_y*p_y);   //r_dot
   }
 
+  /************************** find mean and covariance of measurement sigma points *************************/
   //mean predicted measurement
   VectorXd z_pred = VectorXd(n_z);
   z_pred.fill(0.0);
-  for (int i=0; i < 2*n_aug+1; i++) {
-      z_pred = z_pred + weights(i) * Zsig.col(i);
+  for (int i=0; i < 2*n_aug_+1; i++) {
+    z_pred = z_pred + weights_(i) * Zsig.col(i);
   }
 
+  //create matrix for cross correlation Tc
+  MatrixXd Tc = MatrixXd(n_x_, n_z);
+  Tc.fill(0.0);
+  
   //measurement covariance matrix S
-  MatrixXd S = MatrixXd(n_z,n_z);
+  MatrixXd S = MatrixXd(n_z, n_z);
   S.fill(0.0);
-  for (int i = 0; i < 2 * n_aug + 1; i++) {  //2n+1 simga points
+  for (int i = 0; i < 2 * n_aug_ + 1; i++) {  //2n+1 simga points
     //residual
     VectorXd z_diff = Zsig.col(i) - z_pred;
 
@@ -312,13 +326,36 @@ void UKF::UpdateRadar(MeasurementPackage meas_package) {
     while (z_diff(1)> M_PI) z_diff(1)-=2.*M_PI;
     while (z_diff(1)<-M_PI) z_diff(1)+=2.*M_PI;
 
-    S = S + weights(i) * z_diff * z_diff.transpose();
+    S = S + weights_(i) * z_diff * z_diff.transpose();
+    
+    // state difference
+    VectorXd x_diff = Xsig_pred_.col(i) - x_;
+    //angle normalization
+    while (x_diff(3)> M_PI) x_diff(3)-=2.*M_PI;
+    while (x_diff(3)<-M_PI) x_diff(3)+=2.*M_PI;
+
+    Tc = Tc + weights_(i) * x_diff * z_diff.transpose();
   }
 
   //add measurement noise covariance matrix
-  MatrixXd R = MatrixXd(n_z,n_z);
-  R <<    std_radr*std_radr, 0, 0,
-          0, std_radphi*std_radphi, 0,
-          0, 0,std_radrd*std_radrd;
+  MatrixXd R = MatrixXd(n_z, n_z);
+  R <<    std_radr_*std_radr_, 0, 0,
+          0, std_radphi_*std_radphi_, 0,
+          0, 0,std_radrd_*std_radrd_;
   S = S + R;
+
+  /************************** Measurement update ********************************/
+  //Kalman gain K;
+  MatrixXd K = Tc * S.inverse();
+
+  //residual
+  VectorXd z_diff = meas_package.raw_measurements_ - z_pred;
+
+  //angle normalization
+  while (z_diff(1)> M_PI) z_diff(1)-=2.*M_PI;
+  while (z_diff(1)<-M_PI) z_diff(1)+=2.*M_PI;
+
+  //update state mean and covariance matrix
+  x_ = x_ + K * z_diff;
+  P_ = P_ - K*S*K.transpose();
 }
