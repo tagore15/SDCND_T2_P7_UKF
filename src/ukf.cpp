@@ -30,10 +30,10 @@ UKF::UKF() {
 
 
   // Process noise standard deviation longitudinal acceleration in m/s^2
-  std_a_ = 30;
+  std_a_ = 4; //30;
 
   // Process noise standard deviation yaw acceleration in rad/s^2
-  std_yawdd_ = 30;
+  std_yawdd_ = 2; //30;
 
   // Laser measurement noise standard deviation position1 in m
   std_laspx_ = 0.15;
@@ -168,8 +168,8 @@ void UKF::Prediction(double delta_t) {
   
   // create augmented sigma points
   Xsig_aug.col(0) = x_aug;
-  cout << "MEAN" << endl;
-  cout << Xsig_aug.col(0) << endl;
+  //cout << "MEAN" << endl;
+  //cout << Xsig_aug.col(0) << endl;
   for (int i = 0; i < n_aug_; i++)
   {
     Xsig_aug.col(i+1) = x_aug + sqrt(lambda_ + n_aug_) * L.col(i);
